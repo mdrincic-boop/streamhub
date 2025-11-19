@@ -1,12 +1,13 @@
+cat > /var/www/vhosts/digitalandromeda.com/streamhub/server.cjs << 'ENDOFFILE'
 const NodeMediaServer = require('node-media-server');
-const { createClient } = require('@supabase/supabase-js');
+const { createClient } = require('@supabase/Bolt Database-js');
 const os = require('os');
 const { spawn } = require('child_process');
 require('dotenv').config();
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+const Bolt Database = createClient(supabaseUrl, supabaseKey);
 
 const rtmpPort = parseInt(process.env.VITE_RTMP_PORT || '1935');
 const httpPort = parseInt(process.env.VITE_HTTP_PORT || '8000');
@@ -103,7 +104,7 @@ async function startRTSPPull(stream) {
         startRTSPPull(stream);
       }, 5000);
     } else {
-      await supabase
+      await Bolt Database
         .from('streams')
         .update({ status: 'offline', ended_at: new Date().toISOString() })
         .eq('id', stream.id);
@@ -117,7 +118,7 @@ async function startRTSPPull(stream) {
     streamName: stream.stream_name
   });
 
-  await supabase
+  await Bolt Database
     .from('streams')
     .update({ status: 'live', started_at: new Date().toISOString() })
     .eq('id', stream.id);
@@ -135,7 +136,7 @@ function stopRTSPPull(streamKey) {
 async function loadAndStartRTSPStreams() {
   console.log('[RTSP] Loading RTSP streams from database...');
 
-  const { data: rtspStreams, error } = await supabase
+  const { data: rtspStreams, error } = await Bolt Database
     .from('streams')
     .select('*')
     .eq('input_type', 'rtsp')
@@ -246,7 +247,7 @@ nms.on('prePublish', async (id, StreamPath, args) => {
 
   const streamKey = args.split('=')[1];
 
-  const { data: stream, error } = await supabase
+  const { data: stream, error } = await Bolt Database
     .from('streams')
     .select('*, stream_settings(*), stream_overlays(*)')
     .eq('stream_key', streamKey)
@@ -287,7 +288,7 @@ nms.on('prePublish', async (id, StreamPath, args) => {
     })));
   }
 
-  await supabase
+  await Bolt Database
     .from('streams')
     .update({
       status: 'live',
@@ -328,14 +329,14 @@ nms.on('donePublish', async (id, StreamPath, args) => {
 
   const streamKey = args.split('=')[1];
 
-  const { data: stream } = await supabase
+  const { data: stream } = await Bolt Database
     .from('streams')
     .select('id')
     .eq('stream_key', streamKey)
     .maybeSingle();
 
   if (stream) {
-    await supabase
+    await Bolt Database
       .from('streams')
       .update({
         status: 'offline',
@@ -355,14 +356,14 @@ nms.on('postPlay', async (id, StreamPath, args) => {
 
   const streamName = StreamPath.split('/').pop();
 
-  const { data: stream } = await supabase
+  const { data: stream } = await Bolt Database
     .from('streams')
     .select('id, viewer_count')
     .eq('stream_name', streamName)
     .maybeSingle();
 
   if (stream) {
-    await supabase
+    await Bolt Database
       .from('streams')
       .update({
         viewer_count: (stream.viewer_count || 0) + 1
@@ -376,14 +377,14 @@ nms.on('donePlay', async (id, StreamPath, args) => {
 
   const streamName = StreamPath.split('/').pop();
 
-  const { data: stream } = await supabase
+  const { data: stream } = await Bolt Database
     .from('streams')
     .select('id, viewer_count')
     .eq('stream_name', streamName)
     .maybeSingle();
 
   if (stream) {
-    await supabase
+    await Bolt Database
       .from('streams')
       .update({
         viewer_count: Math.max((stream.viewer_count || 1) - 1, 0)
@@ -399,7 +400,7 @@ async function collectHealthMetrics() {
     const freeMem = os.freemem();
     const memoryUsage = ((totalMem - freeMem) / totalMem) * 100;
 
-    const { data: streams } = await supabase
+    const { data: streams } = await Bolt Database
       .from('streams')
       .select('status, viewer_count')
       .eq('status', 'live');
@@ -407,7 +408,7 @@ async function collectHealthMetrics() {
     const activeStreams = streams?.length || 0;
     const totalViewers = streams?.reduce((acc, s) => acc + (s.viewer_count || 0), 0) || 0;
 
-    await supabase
+    await Bolt Database
       .from('server_health')
       .insert({
         server_name: serverName,
@@ -445,7 +446,7 @@ console.log('\n📹 RTSP support enabled for IP cameras');
 collectHealthMetrics();
 loadAndStartRTSPStreams();
 
-const streamSubscription = supabase
+const streamSubscription = Bolt Database
   .channel('stream-changes')
   .on('postgres_changes', {
     event: 'INSERT',
@@ -487,3 +488,7 @@ process.on('SIGINT', () => {
   streamSubscription.unsubscribe();
   process.exit(0);
 });
+ENDOFFILE
+
+pm2 restart streamhub-media
+pm2 logs streamhub-media --lines 50
