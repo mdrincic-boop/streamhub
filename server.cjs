@@ -14,6 +14,8 @@ const httpHost = process.env.VITE_HTTP_HOST || 'localhost';
 const isProduction = process.env.NODE_ENV === 'production';
 const serverName = process.env.SERVER_NAME || os.hostname();
 
+const activeRTSPStreams = new Map();
+
 const config = {
   rtmp: {
     port: rtmpPort,
@@ -109,6 +111,11 @@ async function startRTSPPull(stream) {
   });
 
   rtspProcesses.set(streamKey, ffmpeg);
+  activeRTSPStreams.set(stream.stream_name, {
+    streamKey,
+    streamId: stream.id,
+    streamName: stream.stream_name
+  });
 
   await supabase
     .from('streams')
@@ -217,8 +224,23 @@ function getOverlayFilter(overlays) {
 nms.on('prePublish', async (id, StreamPath, args) => {
   console.log('[NodeEvent on prePublish]', `id=${id} StreamPath=${StreamPath} args=${JSON.stringify(args)}`);
 
+  if (!StreamPath || StreamPath === 'undefined') {
+    console.log('[Auth] Invalid StreamPath');
+    return;
+  }
+
+  const streamName = StreamPath.split('/').pop();
+  const rtspStream = activeRTSPStreams.get(streamName);
+
+  if (rtspStream) {
+    console.log('[Auth] RTSP stream authorized:', streamName);
+    return;
+  }
+
   if (!args) {
-    console.log('[Auth] No stream key provided');
+    console.log('[Auth] No stream key provided for non-RTSP stream');
+    const session = nms.getSession(id);
+    if (session) session.reject();
     return;
   }
 
@@ -285,8 +307,22 @@ nms.on('postPublish', (id, StreamPath, args) => {
 nms.on('donePublish', async (id, StreamPath, args) => {
   console.log('[NodeEvent on donePublish]', `id=${id} StreamPath=${StreamPath} args=${JSON.stringify(args)}`);
 
-  if (!args || !StreamPath) {
-    console.log('[Cleanup] No args or StreamPath, skipping');
+  if (!StreamPath || StreamPath === 'undefined') {
+    console.log('[Cleanup] Invalid StreamPath, skipping');
+    return;
+  }
+
+  const streamName = StreamPath.split('/').pop();
+  const rtspStream = activeRTSPStreams.get(streamName);
+
+  if (rtspStream) {
+    console.log('[Cleanup] RTSP stream ended:', streamName);
+    activeRTSPStreams.delete(streamName);
+    return;
+  }
+
+  if (!args) {
+    console.log('[Cleanup] No args for non-RTSP stream');
     return;
   }
 
