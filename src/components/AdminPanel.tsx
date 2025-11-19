@@ -168,6 +168,33 @@ export function AdminPanel() {
     loadStreams();
   };
 
+  const checkAllStreams = async () => {
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/stream-processor/check-all`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        console.error('Failed to check streams:', await response.text());
+        alert('Failed to check streams. See console for details.');
+      } else {
+        const result = await response.json();
+        alert(`Checked ${result.checked} streams successfully!`);
+        loadStreams();
+      }
+    } catch (error) {
+      console.error('Error checking streams:', error);
+      alert('Error checking streams. See console for details.');
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -338,15 +365,25 @@ export function AdminPanel() {
             )}
 
             {activeTab === 'streams' && (
-              <div>
-                <h3 className="font-semibold text-slate-900 mb-3">All Streams</h3>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-slate-900">All Streams</h3>
+                  <button
+                    onClick={checkAllStreams}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                  >
+                    Check All RTSP Streams
+                  </button>
+                </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 border-b border-slate-200">
                       <tr>
                         <th className="text-left p-3 text-slate-700 font-medium">Name</th>
                         <th className="text-left p-3 text-slate-700 font-medium">Title</th>
+                        <th className="text-left p-3 text-slate-700 font-medium">Type</th>
                         <th className="text-left p-3 text-slate-700 font-medium">Status</th>
+                        <th className="text-left p-3 text-slate-700 font-medium">Last Check</th>
                         <th className="text-left p-3 text-slate-700 font-medium">Viewers</th>
                         <th className="text-left p-3 text-slate-700 font-medium">Created</th>
                         <th className="text-left p-3 text-slate-700 font-medium">Actions</th>
@@ -358,11 +395,21 @@ export function AdminPanel() {
                           <td className="p-3 text-slate-900 font-medium">{stream.stream_name}</td>
                           <td className="p-3 text-slate-600">{stream.title || '-'}</td>
                           <td className="p-3">
+                            <span className="px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                              {stream.input_type || 'rtmp'}
+                            </span>
+                          </td>
+                          <td className="p-3">
                             <span className={`px-2 py-1 rounded text-xs font-medium ${
                               stream.status === 'live' ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'
                             }`}>
                               {stream.status}
                             </span>
+                          </td>
+                          <td className="p-3 text-slate-600 text-xs">
+                            {stream.last_checked_at
+                              ? new Date(stream.last_checked_at).toLocaleString()
+                              : 'Never'}
                           </td>
                           <td className="p-3 text-slate-900">{stream.viewer_count || 0}</td>
                           <td className="p-3 text-slate-600">

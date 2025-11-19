@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
-    "media-server": "node server.js"
+    "media-server": "node server.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
