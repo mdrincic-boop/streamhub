@@ -71,7 +71,8 @@ async function startRTSPPull(stream) {
   const ffmpegArgs = [
     '-rtsp_transport', 'tcp',
     '-i', rtspUrl,
-    '-c:v', 'copy',
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
     '-c:a', 'aac',
     '-f', 'flv',
     rtmpOutput
@@ -216,6 +217,11 @@ function getOverlayFilter(overlays) {
 nms.on('prePublish', async (id, StreamPath, args) => {
   console.log('[NodeEvent on prePublish]', `id=${id} StreamPath=${StreamPath} args=${JSON.stringify(args)}`);
 
+  if (!args) {
+    console.log('[Auth] No stream key provided');
+    return;
+  }
+
   const streamKey = args.split('=')[1];
 
   const { data: stream, error } = await supabase
@@ -278,6 +284,11 @@ nms.on('postPublish', (id, StreamPath, args) => {
 
 nms.on('donePublish', async (id, StreamPath, args) => {
   console.log('[NodeEvent on donePublish]', `id=${id} StreamPath=${StreamPath} args=${JSON.stringify(args)}`);
+
+  if (!args || !StreamPath) {
+    console.log('[Cleanup] No args or StreamPath, skipping');
+    return;
+  }
 
   const streamKey = args.split('=')[1];
 
