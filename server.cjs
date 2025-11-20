@@ -64,23 +64,38 @@ async function startRTSPPull(stream) {
     rtspUrl = `rtsp://${stream.rtsp_username}:${stream.rtsp_password}@${host}/${path}`;
   }
 
-  const rtmpOutput = `rtmp://localhost:${rtmpPort}/live/${stream.stream_name}?key=${streamKey}`;
+  const hlsOutputDir = `./media/live/${stream.stream_name}`;
+  const hlsOutputPath = `${hlsOutputDir}/index.m3u8`;
 
   console.log(`[RTSP] Starting pull for ${stream.stream_name}`);
   console.log(`[RTSP] Source: ${rtspUrl.replace(/:([^:@]+)@/, ':****@')}`);
-  console.log(`[RTSP] Output: ${rtmpOutput.replace(/key=[^&]+/, 'key=****')}`);
+  console.log(`[RTSP] HLS Output: ${hlsOutputPath}`);
 
   const ffmpegArgs = [
     '-rtsp_transport', 'tcp',
     '-i', rtspUrl,
     '-c:v', 'libx264',
     '-preset', 'veryfast',
+    '-tune', 'zerolatency',
     '-c:a', 'aac',
-    '-f', 'flv',
-    rtmpOutput
+    '-f', 'hls',
+    '-hls_time', '2',
+    '-hls_list_size', '3',
+    '-hls_flags', 'delete_segments+append_list',
+    '-hls_segment_filename', `${hlsOutputDir}/%03d.ts`,
+    hlsOutputPath
   ];
 
-  const ffmpeg = spawn('ffmpeg', ffmpegArgs);
+  const { spawn: spawnProcess } = require('child_process');
+  const { mkdirSync } = require('fs');
+
+  try {
+    mkdirSync(hlsOutputDir, { recursive: true });
+  } catch (e) {
+    console.error(`[RTSP] Error creating directory: ${e.message}`);
+  }
+
+  const ffmpeg = spawnProcess('ffmpeg', ffmpegArgs);
 
   ffmpeg.stdout.on('data', (data) => {
     console.log(`[RTSP][${stream.stream_name}] ${data}`);
@@ -117,9 +132,16 @@ async function startRTSPPull(stream) {
     streamName: stream.stream_name
   });
 
+  const protocol = process.env.VITE_HTTP_SECURE === 'true' ? 'https' : 'http';
+  const hlsUrl = `${protocol}://${httpHost}${httpPort === 80 || httpPort === 443 ? '' : ':' + httpPort}/live/${stream.stream_name}/index.m3u8`;
+
   await supabase
     .from('streams')
-    .update({ status: 'live', started_at: new Date().toISOString() })
+    .update({
+      status: 'live',
+      started_at: new Date().toISOString(),
+      hls_url: hlsUrl
+    })
     .eq('id', stream.id);
 }
 
@@ -222,6 +244,13 @@ function getOverlayFilter(overlays) {
 }
 
 nms.on('prePublish', async (id, StreamPath, args) => {
+  // If id is an object (session), extract the actual values
+  if (typeof id === 'object') {
+    StreamPath = id.streamPath;
+    args = id.streamQuery;
+    id = id.id;
+  }
+
   console.log('[NodeEvent on prePublish]', `id=${id} StreamPath=${StreamPath} args=${JSON.stringify(args)}`);
 
   if (!StreamPath || StreamPath === 'undefined') {
@@ -287,6 +316,64 @@ nms.on('prePublish', async (id, StreamPath, args) => {
     })));
   }
 
+  console.log('[Auth] Stream authorized:', stream.stream_name);
+});
+
+nms.on('postPublish', async (id, StreamPath, args) => {
+  // If id is an object (session), extract the actual values
+  if (typeof id === 'object') {
+    StreamPath = id.streamPath;
+    args = id.streamQuery;
+    id = id.id;
+  }
+
+  console.log('[NodeEvent on postPublish]', `id=${id} StreamPath=${StreamPath} args=${JSON.stringify(args)}`);
+
+  if (!StreamPath || StreamPath === 'undefined') {
+    console.log('[Publish] Invalid StreamPath');
+    return;
+  }
+
+  const streamName = StreamPath.split('/').pop();
+  const rtspStream = activeRTSPStreams.get(streamName);
+
+  if (rtspStream) {
+    console.log('[Publish] RTSP stream is now live:', streamName);
+    const protocol = process.env.VITE_HTTP_SECURE === 'true' ? 'https' : 'http';
+    const hlsUrl = `${protocol}://${httpHost}${httpPort === 80 || httpPort === 443 ? '' : ':' + httpPort}/live/${streamName}/index.m3u8`;
+
+    await supabase
+      .from('streams')
+      .update({
+        status: 'live',
+        started_at: new Date().toISOString(),
+        hls_url: hlsUrl
+      })
+      .eq('id', rtspStream.streamId);
+    return;
+  }
+
+  if (!args) {
+    console.log('[Publish] No args provided for non-RTSP stream');
+    return;
+  }
+
+  const streamKey = args.split('=')[1];
+
+  const { data: stream, error } = await supabase
+    .from('streams')
+    .select('id, stream_name')
+    .eq('stream_key', streamKey)
+    .maybeSingle();
+
+  if (error || !stream) {
+    console.log('[Publish] Stream not found for key:', streamKey);
+    return;
+  }
+
+  const protocol = process.env.VITE_HTTP_SECURE === 'true' ? 'https' : 'http';
+  const hlsUrl = `${protocol}://${httpHost}${httpPort === 80 || httpPort === 443 ? '' : ':' + httpPort}${StreamPath.replace('/live/', '/live/')}/index.m3u8`;
+
   await supabase
     .from('streams')
     .update({
@@ -297,15 +384,18 @@ nms.on('prePublish', async (id, StreamPath, args) => {
     })
     .eq('id', stream.id);
 
-  console.log('[Auth] Stream authorized:', stream.stream_name);
-});
-
-nms.on('postPublish', (id, StreamPath, args) => {
-  console.log('[NodeEvent on postPublish]', `id=${id} StreamPath=${StreamPath} args=${JSON.stringify(args)}`);
+  console.log('[Publish] Stream is now live:', stream.stream_name);
 });
 
 nms.on('donePublish', async (id, StreamPath, args) => {
-  console.log('[NodeEvent on donePublish]', `id=${id} StreamPath=${StreamPath} args=${JSON.stringify(args)}`);
+  console.log('[NodeEvent on donePublish]', `id=${typeof id === 'object' ? id.id : id} StreamPath=${StreamPath} args=${args}`);
+
+  // If id is an object (session), extract the actual values
+  if (typeof id === 'object' && id.publishStreamPath) {
+    StreamPath = id.publishStreamPath;
+    args = id.publishArgs;
+    id = id.id;
+  }
 
   if (!StreamPath || StreamPath === 'undefined') {
     console.log('[Cleanup] Invalid StreamPath, skipping');
