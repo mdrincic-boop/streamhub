@@ -61,7 +61,9 @@ async function startRTSPPull(stream) {
     const urlParts = rtspUrl.replace('rtsp://', '').split('/');
     const host = urlParts[0];
     const path = urlParts.slice(1).join('/');
-    rtspUrl = `rtsp://${stream.rtsp_username}:${stream.rtsp_password}@${host}/${path}`;
+    const encodedUsername = encodeURIComponent(stream.rtsp_username);
+    const encodedPassword = encodeURIComponent(stream.rtsp_password);
+    rtspUrl = `rtsp://${encodedUsername}:${encodedPassword}@${host}/${path}`;
   }
 
   const hlsOutputDir = `./media/live/${stream.stream_name}`;
