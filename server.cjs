@@ -103,7 +103,9 @@ async function startRTSPPull(stream) {
 
   ffmpeg.stderr.on('data', (data) => {
     const message = data.toString();
-    console.log(`[RTSP][${stream.stream_name}] FFmpeg: ${message}`);
+    if (message.includes('error') || message.includes('Error')) {
+      console.error(`[RTSP][${stream.stream_name}] Error: ${message}`);
+    }
   });
 
   ffmpeg.on('close', async (code) => {
